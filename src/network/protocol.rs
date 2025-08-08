@@ -1,3 +1,5 @@
+// Temporarily commented out - using direct integration in main.rs instead
+/*
 use crate::config::Config;
 use crate::message::{ChatEvent, Message};
 use crate::network::{DiscoveryService, PeerManager};
@@ -124,3 +126,4 @@ impl NetworkProtocol {
         self.peer_manager.connected_peers()
     }
 }
+*/

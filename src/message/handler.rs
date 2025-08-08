@@ -92,9 +92,17 @@ impl MessageHandler {
                 
                 self.add_peer(peer_with_id.clone());
                 
-                let event = ChatEvent::new(peer_with_id, message);
-                if let Err(e) = self.event_sender.send(event) {
+                // Send both discovery response and connect events
+                let response_event = ChatEvent::new(peer_with_id.clone(), message.clone());
+                if let Err(e) = self.event_sender.send(response_event) {
                     warn!("Failed to send discovery response event: {}", e);
+                }
+                
+                // Send a connect trigger event
+                let connect_message = Message::user_join(username.clone(), *peer_id);
+                let connect_event = ChatEvent::new(peer_with_id, connect_message);
+                if let Err(e) = self.event_sender.send(connect_event) {
+                    warn!("Failed to send connect event: {}", e);
                 }
             }
             

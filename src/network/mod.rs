@@ -4,4 +4,4 @@ pub mod protocol;
 
 pub use discovery::DiscoveryService;
 pub use peer::PeerManager;
-pub use protocol::NetworkProtocol;
+// pub use protocol::NetworkProtocol;

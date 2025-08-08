@@ -103,15 +103,18 @@ impl App {
                 self.update_status(format!("Discovered peer: {}", username));
             }
             Message::DiscoveryResponse { username, .. } => {
-                self.peers.insert(event.peer.id, event.peer);
-                self.update_status(format!("Connected to peer: {}", username));
+                self.peers.insert(event.peer.id, event.peer.clone());
+                self.update_status(format!("Found peer: {}", username));
+                
+                // TODO: We need a way to trigger TCP connection here
+                // For now, just update status
             }
             Message::ChatMessage { sender, content, .. } => {
                 self.add_message(sender, content, false);
             }
             Message::UserJoin { username, .. } => {
                 self.peers.insert(event.peer.id, event.peer);
-                self.update_status(format!("{} joined the chat", username));
+                self.update_status(format!("{} joined via TCP", username));
             }
             Message::UserLeave { username, .. } => {
                 self.peers.remove(&event.peer.id);

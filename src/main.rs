@@ -6,7 +6,7 @@ mod ui;
 use anyhow::Result;
 use config::Config;
 use message::ChatEvent;
-use network::DiscoveryService;
+use network::{DiscoveryService, PeerManager};
 use std::env;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -35,8 +35,19 @@ async fn main() -> Result<()> {
     let (event_sender, event_receiver) = mpsc::unbounded_channel::<ChatEvent>();
     let (message_sender, mut message_receiver) = mpsc::unbounded_channel::<String>();
     
-    // Create the app
-    let app = App::new(username, event_receiver, message_sender);
+    // Create peer manager
+    let peer_manager = std::sync::Arc::new(PeerManager::new(
+        config.tcp_port_range.0,
+        event_sender.clone(),
+        username.clone(),
+        uuid::Uuid::new_v4(),
+    ).await?);
+    
+    // Create channels for peer connection coordination
+    let (connection_sender, mut connection_receiver) = mpsc::unbounded_channel::<message::Peer>();
+    
+    // Create the app with peer manager reference
+    let app = App::new(username, event_receiver, message_sender.clone());
     let mut terminal_ui = TerminalUI::new(app);
     
     // Start discovery service in background
@@ -55,11 +66,42 @@ async fn main() -> Result<()> {
         }
     });
     
+    // Start peer manager in background
+    let peer_manager_clone = peer_manager.clone();
+    let peer_manager_task = tokio::spawn(async move {
+        if let Err(e) = peer_manager_clone.start().await {
+            error!("Peer manager failed: {}", e);
+        }
+    });
+    
+    // Handle peer connections
+    let peer_manager_for_connections = peer_manager.clone();
+    let connection_task = tokio::spawn(async move {
+        while let Some(peer) = connection_receiver.recv().await {
+            info!("Attempting to connect to peer: {}", peer.username);
+            if let Err(e) = peer_manager_for_connections.connect_to_peer(&peer).await {
+                error!("Failed to connect to peer {}: {}", peer.username, e);
+            }
+        }
+    });
+    
     // Handle outgoing messages
+    let peer_manager_for_messages = peer_manager.clone();
     let message_task = tokio::spawn(async move {
-        while let Some(message) = message_receiver.recv().await {
-            // In a full implementation, this would send the message through the network
-            info!("Would send message: {}", message);
+        while let Some(message_content) = message_receiver.recv().await {
+            info!("Broadcasting message: {}", message_content);
+            
+            // Create a chat message
+            let chat_message = message::Message::chat_message(
+                "You".to_string(), // TODO: Use actual username
+                "all".to_string(),
+                message_content
+            );
+            
+            // Broadcast to all connected peers
+            if let Err(e) = peer_manager_for_messages.broadcast_message(&chat_message).await {
+                error!("Failed to broadcast message: {}", e);
+            }
         }
     });
     
@@ -79,20 +121,30 @@ async fn main() -> Result<()> {
                     error!("Discovery task panicked: {}", e);
                 }
             }
-        result = message_task => {
-            if let Err(e) = result {
-                error!("Message task panicked: {}", e);
+            result = peer_manager_task => {
+                if let Err(e) = result {
+                    error!("Peer manager task panicked: {}", e);
+                }
+            }
+            result = connection_task => {
+                if let Err(e) = result {
+                    error!("Connection task panicked: {}", e);
+                }
+            }
+            result = message_task => {
+                if let Err(e) = result {
+                    error!("Message task panicked: {}", e);
+                }
+            }
+            result = ui_task => {
+                if let Err(e) = result {
+                    error!("UI task panicked: {}", e);
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl+C, shutting down...");
             }
         }
-        result = ui_task => {
-            if let Err(e) = result {
-                error!("UI task panicked: {}", e);
-            }
-        }
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received Ctrl+C, shutting down...");
-        }
-    }
     
     info!("Local Chat shutting down. Goodbye! 👋");
     Ok(())
