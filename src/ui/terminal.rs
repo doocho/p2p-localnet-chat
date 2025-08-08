@@ -23,22 +23,28 @@ impl TerminalUI {
         // Enable raw mode for real-time input
         terminal::enable_raw_mode()?;
         
-        // Clear screen and set up initial display
+        // Hide cursor and clear screen
         execute!(
             stdout(),
+            cursor::Hide,
             terminal::Clear(ClearType::All),
             cursor::MoveTo(0, 0)
         )?;
         
         self.display_header()?;
         
+        let mut last_ui_update = std::time::Instant::now();
+        
         // Main input loop
         loop {
             // Handle any pending chat events
             self.app.handle_events().await;
             
-            // Redraw UI
-            self.redraw_ui()?;
+            // Only redraw UI every 200ms to reduce flicker and improve stability
+            if last_ui_update.elapsed() >= Duration::from_millis(200) {
+                self.redraw_ui()?;
+                last_ui_update = std::time::Instant::now();
+            }
             
             // Check for keyboard input (non-blocking)
             if event::poll(Duration::from_millis(50))? {
@@ -47,6 +53,9 @@ impl TerminalUI {
                         if self.handle_key_event(key_event).await? {
                             break; // User wants to quit
                         }
+                        // Immediately redraw UI after key input
+                        self.redraw_ui()?;
+                        last_ui_update = std::time::Instant::now();
                     }
                     _ => {}
                 }
@@ -58,13 +67,22 @@ impl TerminalUI {
         
         // Restore terminal
         terminal::disable_raw_mode()?;
-        execute!(stdout(), cursor::Show)?;
-        println!("\n\nGoodbye! 👋");
+        execute!(
+            stdout(),
+            cursor::Show,
+            cursor::MoveTo(0, terminal::size()?.1),
+            Print("\n")
+        )?;
+        println!("Goodbye! 👋");
         
         Ok(())
     }
     
     fn display_header(&self) -> Result<()> {
+        let (width, _) = terminal::size()?;
+        let safe_width = if width < 20 { 20 } else { width } as usize;
+        let separator_width = safe_width.min(80);
+        
         execute!(
             stdout(),
             SetForegroundColor(Color::Cyan),
@@ -73,18 +91,24 @@ impl TerminalUI {
             Print(format!("Connected as: {}\n", self.app.username)),
             ResetColor,
             Print("Press Ctrl+C to quit | Type your message and press Enter to send\n"),
-            Print("─".repeat(60)),
+            Print("─".repeat(separator_width)),
             Print("\n")
         )?;
         Ok(())
     }
     
     fn redraw_ui(&self) -> Result<()> {
-        // Move to message area (line 5)
-        execute!(stdout(), cursor::MoveTo(0, 4))?;
+        // Get terminal size
+        let (width, height) = terminal::size()?;
         
-        // Clear from cursor to end of screen
-        execute!(stdout(), terminal::Clear(ClearType::FromCursorDown))?;
+        // Clear entire screen and redraw header
+        execute!(
+            stdout(),
+            terminal::Clear(ClearType::All),
+            cursor::MoveTo(0, 0)
+        )?;
+        
+        self.display_header()?;
         
         // Display peer status
         let peer_count = self.app.get_peer_count();
@@ -96,9 +120,14 @@ impl TerminalUI {
                 ResetColor
             )?;
             
-            // Show peer list
+            // Show peer list with consistent indentation
             for peer_info in self.app.get_peer_list() {
-                execute!(stdout(), Print(format!("  └─ {}\n", peer_info)))?;
+                execute!(
+                    stdout(),
+                    cursor::MoveToColumn(0),
+                    Print(format!("  └─ {}", peer_info)),
+                    Print("\n")
+                )?;
             }
         } else {
             execute!(
@@ -109,13 +138,19 @@ impl TerminalUI {
             )?;
         }
         
-        println!();
+        // Add spacing only if there are peers
+        if peer_count > 0 {
+            execute!(stdout(), cursor::MoveToColumn(0), Print("\n"))?;
+        }
         
-        // Display recent messages (last 10)
+        // Calculate available space for messages (leaving space for input area)
+        let max_message_lines = if height > 10 { height - 10 } else { 5 };
+        
+        // Display recent messages (limited by screen space)
         let recent_messages: Vec<_> = self.app.messages
             .iter()
             .rev()
-            .take(10)
+            .take(max_message_lines as usize)
             .rev()
             .collect();
         
@@ -129,32 +164,82 @@ impl TerminalUI {
             
             for msg in recent_messages {
                 let time = msg.timestamp.format("%H:%M:%S");
+                
+                // Calculate max content width considering indentation
+                let indent = "  ";  // 2-space indentation for all messages
+                
+                // Use safe width calculation with minimum guarantees
+                let safe_width = if width < 40 { 40 } else { width } as usize;
+                let reserved_space = 25; // Reserve space for timestamp, username, etc.
+                let max_content_width = safe_width.saturating_sub(reserved_space);
+                
+                // Ensure minimum content width
+                let max_content_width = if max_content_width < 10 { 10 } else { max_content_width };
+                
+                let truncated_content = if msg.content.len() > max_content_width {
+                    if max_content_width > 3 {
+                        format!("{}...", &msg.content[..max_content_width - 3])
+                    } else {
+                        "...".to_string()
+                    }
+                } else {
+                    msg.content.clone()
+                };
+                
+                // Always start from beginning of line and use fixed positioning
                 if msg.is_own_message {
                     execute!(
                         stdout(),
+                        cursor::MoveToColumn(0),
                         SetForegroundColor(Color::Blue),
-                        Print(format!("[{}] You: {}\n", time, msg.content)),
-                        ResetColor
+                        Print(format!("{}[{}] You: {}", indent, time, truncated_content)),
+                        ResetColor,
+                        Print("\n")
                     )?;
                 } else {
+                    let sender_truncated = if msg.sender.len() > 10 {
+                        format!("{}...", &msg.sender[..7])
+                    } else {
+                        msg.sender.clone()
+                    };
                     execute!(
                         stdout(),
+                        cursor::MoveToColumn(0),
                         SetForegroundColor(Color::Magenta),
-                        Print(format!("[{}] {}: {}\n", time, msg.sender, msg.content)),
-                        ResetColor
+                        Print(format!("{}[{}] {}: {}", indent, time, sender_truncated, truncated_content)),
+                        ResetColor,
+                        Print("\n")
                     )?;
                 }
             }
-            println!();
+            // Add spacing after messages
+            execute!(stdout(), cursor::MoveToColumn(0), Print("\n"))?;
         }
         
-        // Display input line
+        // Display input line with proper sizing
+        let safe_width = if width < 20 { 20 } else { width } as usize;
+        let separator_width = safe_width.min(80);
+        let max_input_width = safe_width.saturating_sub(5); // Leave space for "> " and safety margin
+        
+        let display_input = if self.app.input.len() > max_input_width {
+            if max_input_width > 6 {
+                format!("...{}", &self.app.input[self.app.input.len().saturating_sub(max_input_width - 3)..])
+            } else {
+                "...".to_string()
+            }
+        } else {
+            self.app.input.clone()
+        };
+        
         execute!(
             stdout(),
+            cursor::MoveToColumn(0),
             SetForegroundColor(Color::White),
-            Print("─".repeat(60)),
-            Print("\n> "),
-            Print(&self.app.input),
+            Print("─".repeat(separator_width)),
+            Print("\n"),
+            cursor::MoveToColumn(0),
+            Print("> "),
+            Print(&display_input),
             ResetColor
         )?;
         
