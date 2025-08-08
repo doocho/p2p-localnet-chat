@@ -333,4 +333,8 @@ impl PeerManager {
     pub async fn get_connection_count(&self) -> usize {
         self.connections.read().await.len()
     }
+    
+    pub fn get_tcp_port(&self) -> Result<u16> {
+        Ok(self.listener.local_addr()?.port())
+    }
 }

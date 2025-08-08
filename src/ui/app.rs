@@ -21,6 +21,7 @@ pub struct App {
     pub status: String,
     event_receiver: mpsc::UnboundedReceiver<ChatEvent>,
     message_sender: mpsc::UnboundedSender<String>,
+    connection_sender: Option<mpsc::UnboundedSender<Peer>>,
 }
 
 impl App {
@@ -28,6 +29,7 @@ impl App {
         username: String,
         event_receiver: mpsc::UnboundedReceiver<ChatEvent>,
         message_sender: mpsc::UnboundedSender<String>,
+        connection_sender: Option<mpsc::UnboundedSender<Peer>>,
     ) -> Self {
         Self {
             username,
@@ -38,6 +40,7 @@ impl App {
             status: "Starting...".to_string(),
             event_receiver,
             message_sender,
+            connection_sender,
         }
     }
 
@@ -106,8 +109,14 @@ impl App {
                 self.peers.insert(event.peer.id, event.peer.clone());
                 self.update_status(format!("Found peer: {}", username));
                 
-                // TODO: We need a way to trigger TCP connection here
-                // For now, just update status
+                // Trigger TCP connection to this peer
+                if let Some(ref connection_sender) = self.connection_sender {
+                    if let Err(e) = connection_sender.send(event.peer.clone()) {
+                        self.update_status(format!("Failed to trigger connection to {}: {}", username, e));
+                    } else {
+                        self.update_status(format!("Connecting to {}...", username));
+                    }
+                }
             }
             Message::ChatMessage { sender, content, .. } => {
                 self.add_message(sender, content, false);

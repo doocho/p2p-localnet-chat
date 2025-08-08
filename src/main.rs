@@ -49,14 +49,18 @@ async fn main() -> Result<()> {
     // Create event channels for peer connection coordination
     let (connection_event_sender, mut connection_event_receiver) = mpsc::unbounded_channel::<ChatEvent>();
     
-    // Create the app with both event receivers
-    let app = App::new(username.clone(), event_receiver, message_sender.clone());
+    // Create the app with connection sender for auto-connection
+    let app = App::new(username.clone(), event_receiver, message_sender.clone(), Some(connection_sender.clone()));
     let mut terminal_ui = TerminalUI::new(app);
+    
+    // Get the actual TCP port from PeerManager
+    let tcp_port = peer_manager.get_tcp_port()?;
+    info!("Using TCP port {} for peer discovery", tcp_port);
     
     // Start discovery service in background
     let discovery_config = config.clone();
     let discovery_task = tokio::spawn(async move {
-        match DiscoveryService::new(discovery_config, event_sender).await {
+        match DiscoveryService::new(discovery_config, event_sender, tcp_port).await {
             Ok(discovery_service) => {
                 info!("Discovery service created, starting...");
                 if let Err(e) = discovery_service.start_discovery().await {

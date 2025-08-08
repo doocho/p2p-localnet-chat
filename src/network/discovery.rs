@@ -16,12 +16,14 @@ pub struct DiscoveryService {
     socket: UdpSocket,
     message_handler: MessageHandler,
     peer_id: Uuid,
+    tcp_port: u16,
 }
 
 impl DiscoveryService {
     pub async fn new(
         mut config: Config,
         event_sender: mpsc::UnboundedSender<crate::message::ChatEvent>,
+        tcp_port: u16,
     ) -> Result<Self> {
         // Use any available port for listening, but still broadcast to the standard port
         let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0); // 0 = any available port
@@ -36,7 +38,7 @@ impl DiscoveryService {
         let actual_addr = socket.local_addr()?;
         info!("Discovery service listening on {}", actual_addr);
         
-        let message_handler = MessageHandler::new(config.username.clone(), event_sender);
+        let message_handler = MessageHandler::new(config.username.clone(), event_sender, tcp_port);
         let peer_id = message_handler.peer_id();
         
         Ok(Self {
@@ -44,6 +46,7 @@ impl DiscoveryService {
             socket,
             message_handler,
             peer_id,
+            tcp_port,
         })
     }
 
@@ -52,6 +55,9 @@ impl DiscoveryService {
         
         let config = self.config.clone();
         let peer_id = self.peer_id;
+        let tcp_port = self.tcp_port;
+        info!("Discovery service configuration: username={}, tcp_port={}, discovery_port={}", 
+              config.username, tcp_port, config.discovery_port);
         
         // Create a separate socket for listening on the standard discovery port
         let standard_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.discovery_port);
@@ -68,10 +74,11 @@ impl DiscoveryService {
         
         // Use our own socket for broadcasting
         let broadcast_socket = Arc::new(self.socket);
-        let mut message_handler = self.message_handler;
+        let message_handler = Arc::new(tokio::sync::RwLock::new(self.message_handler));
         
         // Start listening task (only if we could bind to standard port)
         let listen_task = if let Some(listen_sock) = listen_socket {
+            let message_handler_clone = message_handler.clone();
             Some(tokio::spawn(async move {
                 let mut buf = [0u8; 1024];
                 
@@ -90,7 +97,7 @@ impl DiscoveryService {
                                     }
                                 }
                                 
-                                if let Err(e) = message_handler.handle_message(message, addr.ip()) {
+                                if let Err(e) = message_handler_clone.write().await.handle_message(message, addr.ip()) {
                                     warn!("Failed to handle discovery message: {}", e);
                                 }
                             } else {
@@ -109,13 +116,22 @@ impl DiscoveryService {
         
         // Start broadcasting task
         let broadcast_config = config.clone();
+        let broadcast_tcp_port = tcp_port;
         let broadcast_task = tokio::spawn(async move {
-            let mut interval = interval(Duration::from_secs(5));
+            // Send initial broadcast immediately
+            info!("Sending initial discovery broadcast...");
+            if let Err(e) = Self::send_discovery_broadcast_static(&broadcast_socket, &broadcast_config, peer_id, broadcast_tcp_port).await {
+                warn!("Failed to send initial discovery broadcast: {}", e);
+            }
+            
+            let mut interval = interval(Duration::from_secs(3));
+            interval.tick().await; // Skip the first immediate tick
             
             loop {
                 interval.tick().await;
                 
-                if let Err(e) = Self::send_discovery_broadcast_static(&broadcast_socket, &broadcast_config, peer_id).await {
+                info!("Sending periodic discovery broadcast...");
+                if let Err(e) = Self::send_discovery_broadcast_static(&broadcast_socket, &broadcast_config, peer_id, broadcast_tcp_port).await {
                     warn!("Failed to send discovery broadcast: {}", e);
                 }
             }
@@ -123,6 +139,7 @@ impl DiscoveryService {
         
         // Run tasks concurrently
         if let Some(listen_task) = listen_task {
+            info!("Starting both listen and broadcast tasks...");
             tokio::select! {
                 result = listen_task => {
                     error!("Discovery listening task ended: {:?}", result);
@@ -132,6 +149,7 @@ impl DiscoveryService {
                 }
             }
         } else {
+            info!("Starting broadcast-only task...");
             // Only run broadcast task
             if let Err(e) = broadcast_task.await {
                 error!("Discovery broadcast task panicked: {:?}", e);
@@ -143,10 +161,10 @@ impl DiscoveryService {
 
 
 
-    async fn send_discovery_broadcast_static(socket: &Arc<UdpSocket>, config: &Config, peer_id: Uuid) -> Result<()> {
+    async fn send_discovery_broadcast_static(socket: &Arc<UdpSocket>, config: &Config, peer_id: Uuid, tcp_port: u16) -> Result<()> {
         let message = Message::discovery(
             config.username.clone(),
-            config.tcp_port_range.0, // Use first port in range for now
+            tcp_port, // Use actual TCP port
             peer_id,
         );
         
@@ -155,16 +173,18 @@ impl DiscoveryService {
         
         // Get local network addresses to broadcast to
         let broadcast_addrs = Self::get_broadcast_addresses_static()?;
+        info!("Broadcasting discovery message to {} addresses", broadcast_addrs.len());
         
         for addr in broadcast_addrs {
             let target = SocketAddr::new(addr, config.discovery_port);
+            info!("Attempting to broadcast to {}", target);
             
             match socket.send_to(&data, target).await {
-                Ok(_) => {
-                    debug!("Sent discovery broadcast to {}", target);
+                Ok(bytes_sent) => {
+                    info!("Sent discovery broadcast to {} ({} bytes)", target, bytes_sent);
                 }
                 Err(e) => {
-                    debug!("Failed to send discovery to {}: {}", target, e);
+                    warn!("Failed to send discovery to {}: {}", target, e);
                 }
             }
         }
@@ -178,6 +198,7 @@ impl DiscoveryService {
         // Get local IP address
         match local_ip() {
             Ok(local_ip) => {
+                info!("Local IP detected: {}", local_ip);
                 match local_ip {
                     IpAddr::V4(ipv4) => {
                         // Generate broadcast address for common private network ranges
@@ -191,6 +212,7 @@ impl DiscoveryService {
                         // For 10.x.x.x networks
                         else if octets[0] == 10 {
                             let broadcast = Ipv4Addr::new(10, octets[1], octets[2], 255);
+                            info!("Adding 10.x.x.x broadcast address: {}", broadcast);
                             broadcast_addrs.push(IpAddr::V4(broadcast));
                         }
                         // For 172.16-31.x.x networks

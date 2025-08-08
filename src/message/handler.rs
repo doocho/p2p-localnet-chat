@@ -11,18 +11,21 @@ pub struct MessageHandler {
     peer_id: Uuid,
     username: String,
     event_sender: mpsc::UnboundedSender<ChatEvent>,
+    tcp_port: u16,
 }
 
 impl MessageHandler {
     pub fn new(
         username: String,
         event_sender: mpsc::UnboundedSender<ChatEvent>,
+        tcp_port: u16,
     ) -> Self {
         Self {
             peers: HashMap::new(),
             peer_id: Uuid::new_v4(),
             username,
             event_sender,
+            tcp_port,
         }
     }
 
@@ -71,7 +74,7 @@ impl MessageHandler {
                 // Send discovery response
                 let response = Message::discovery_response(
                     self.username.clone(),
-                    8000, // TODO: Use actual listening port
+                    self.tcp_port, // Use actual TCP port
                     self.peer_id,
                 );
                 
