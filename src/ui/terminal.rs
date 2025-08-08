@@ -1,6 +1,13 @@
 use crate::ui::App;
 use anyhow::Result;
-use std::io::{self, stdout};
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    execute,
+    style::{Color, Print, ResetColor, SetForegroundColor},
+    terminal::{self, ClearType},
+};
+use std::io::{self, stdout, Write};
 use tokio::time::{sleep, Duration};
 
 pub struct TerminalUI {
@@ -10,6 +17,181 @@ pub struct TerminalUI {
 impl TerminalUI {
     pub fn new(app: App) -> Self {
         Self { app }
+    }
+    
+    pub async fn run_interactive(&mut self) -> Result<()> {
+        // Enable raw mode for real-time input
+        terminal::enable_raw_mode()?;
+        
+        // Clear screen and set up initial display
+        execute!(
+            stdout(),
+            terminal::Clear(ClearType::All),
+            cursor::MoveTo(0, 0)
+        )?;
+        
+        self.display_header()?;
+        
+        // Main input loop
+        loop {
+            // Handle any pending chat events
+            self.app.handle_events().await;
+            
+            // Redraw UI
+            self.redraw_ui()?;
+            
+            // Check for keyboard input (non-blocking)
+            if event::poll(Duration::from_millis(50))? {
+                match event::read()? {
+                    Event::Key(key_event) => {
+                        if self.handle_key_event(key_event).await? {
+                            break; // User wants to quit
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            
+            // Small delay to prevent excessive CPU usage
+            sleep(Duration::from_millis(50)).await;
+        }
+        
+        // Restore terminal
+        terminal::disable_raw_mode()?;
+        execute!(stdout(), cursor::Show)?;
+        println!("\n\nGoodbye! 👋");
+        
+        Ok(())
+    }
+    
+    fn display_header(&self) -> Result<()> {
+        execute!(
+            stdout(),
+            SetForegroundColor(Color::Cyan),
+            Print("🚀 Local Chat v1.0.0\n"),
+            SetForegroundColor(Color::Green),
+            Print(format!("Connected as: {}\n", self.app.username)),
+            ResetColor,
+            Print("Press Ctrl+C to quit | Type your message and press Enter to send\n"),
+            Print("─".repeat(60)),
+            Print("\n")
+        )?;
+        Ok(())
+    }
+    
+    fn redraw_ui(&self) -> Result<()> {
+        // Move to message area (line 5)
+        execute!(stdout(), cursor::MoveTo(0, 4))?;
+        
+        // Clear from cursor to end of screen
+        execute!(stdout(), terminal::Clear(ClearType::FromCursorDown))?;
+        
+        // Display peer status
+        let peer_count = self.app.get_peer_count();
+        if peer_count > 0 {
+            execute!(
+                stdout(),
+                SetForegroundColor(Color::Green),
+                Print(format!("🟢 {} peers connected\n", peer_count)),
+                ResetColor
+            )?;
+            
+            // Show peer list
+            for peer_info in self.app.get_peer_list() {
+                execute!(stdout(), Print(format!("  └─ {}\n", peer_info)))?;
+            }
+        } else {
+            execute!(
+                stdout(),
+                SetForegroundColor(Color::Yellow),
+                Print("🔍 Searching for peers...\n"),
+                ResetColor
+            )?;
+        }
+        
+        println!();
+        
+        // Display recent messages (last 10)
+        let recent_messages: Vec<_> = self.app.messages
+            .iter()
+            .rev()
+            .take(10)
+            .rev()
+            .collect();
+        
+        if !recent_messages.is_empty() {
+            execute!(
+                stdout(),
+                SetForegroundColor(Color::Cyan),
+                Print("💬 Recent Messages:\n"),
+                ResetColor
+            )?;
+            
+            for msg in recent_messages {
+                let time = msg.timestamp.format("%H:%M:%S");
+                if msg.is_own_message {
+                    execute!(
+                        stdout(),
+                        SetForegroundColor(Color::Blue),
+                        Print(format!("[{}] You: {}\n", time, msg.content)),
+                        ResetColor
+                    )?;
+                } else {
+                    execute!(
+                        stdout(),
+                        SetForegroundColor(Color::Magenta),
+                        Print(format!("[{}] {}: {}\n", time, msg.sender, msg.content)),
+                        ResetColor
+                    )?;
+                }
+            }
+            println!();
+        }
+        
+        // Display input line
+        execute!(
+            stdout(),
+            SetForegroundColor(Color::White),
+            Print("─".repeat(60)),
+            Print("\n> "),
+            Print(&self.app.input),
+            ResetColor
+        )?;
+        
+        stdout().flush()?;
+        Ok(())
+    }
+    
+    async fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<bool> {
+        // Only handle key press events (not release)
+        if key_event.kind != KeyEventKind::Press {
+            return Ok(false);
+        }
+        
+        match key_event.code {
+            KeyCode::Char('c') if key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                // Ctrl+C to quit
+                return Ok(true);
+            }
+            KeyCode::Enter => {
+                // Send message
+                if !self.app.input.trim().is_empty() {
+                    self.app.send_message();
+                    self.app.input.clear();
+                }
+            }
+            KeyCode::Backspace => {
+                // Remove last character
+                self.app.remove_char();
+            }
+            KeyCode::Char(c) => {
+                // Add character to input
+                self.app.add_char(c);
+            }
+            _ => {}
+        }
+        
+        Ok(false)
     }
 
     pub async fn run(&mut self) -> Result<()> {

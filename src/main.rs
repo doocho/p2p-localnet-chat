@@ -46,8 +46,11 @@ async fn main() -> Result<()> {
     // Create channels for peer connection coordination
     let (connection_sender, mut connection_receiver) = mpsc::unbounded_channel::<message::Peer>();
     
-    // Create the app with peer manager reference
-    let app = App::new(username, event_receiver, message_sender.clone());
+    // Create event channels for peer connection coordination
+    let (connection_event_sender, mut connection_event_receiver) = mpsc::unbounded_channel::<ChatEvent>();
+    
+    // Create the app with both event receivers
+    let app = App::new(username.clone(), event_receiver, message_sender.clone());
     let mut terminal_ui = TerminalUI::new(app);
     
     // Start discovery service in background
@@ -87,13 +90,14 @@ async fn main() -> Result<()> {
     
     // Handle outgoing messages
     let peer_manager_for_messages = peer_manager.clone();
+    let username_for_messages = username.clone();
     let message_task = tokio::spawn(async move {
         while let Some(message_content) = message_receiver.recv().await {
             info!("Broadcasting message: {}", message_content);
             
             // Create a chat message
             let chat_message = message::Message::chat_message(
-                "You".to_string(), // TODO: Use actual username
+                username_for_messages.clone(),
                 "all".to_string(),
                 message_content
             );
@@ -105,9 +109,9 @@ async fn main() -> Result<()> {
         }
     });
     
-    // Run the terminal UI
+    // Run the terminal UI (interactive mode)
     let ui_task = tokio::spawn(async move {
-        if let Err(e) = terminal_ui.run_simple().await {
+        if let Err(e) = terminal_ui.run_interactive().await {
             error!("Terminal UI failed: {}", e);
         }
     });
