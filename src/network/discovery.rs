@@ -3,7 +3,9 @@ use crate::message::{Message, MessageHandler};
 use anyhow::{Context, Result};
 use local_ip_address::local_ip;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use tokio::net::UdpSocket;
+
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
@@ -18,10 +20,12 @@ pub struct DiscoveryService {
 
 impl DiscoveryService {
     pub async fn new(
-        config: Config,
+        mut config: Config,
         event_sender: mpsc::UnboundedSender<crate::message::ChatEvent>,
     ) -> Result<Self> {
-        let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.discovery_port);
+        // Use any available port for listening, but still broadcast to the standard port
+        let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0); // 0 = any available port
+        
         let socket = UdpSocket::bind(&bind_addr)
             .await
             .context("Failed to bind UDP socket for discovery")?;
@@ -29,7 +33,8 @@ impl DiscoveryService {
         socket.set_broadcast(true)
             .context("Failed to enable broadcast on UDP socket")?;
         
-        info!("Discovery service listening on {}", bind_addr);
+        let actual_addr = socket.local_addr()?;
+        info!("Discovery service listening on {}", actual_addr);
         
         let message_handler = MessageHandler::new(config.username.clone(), event_sender);
         let peer_id = message_handler.peer_id();
@@ -45,68 +50,100 @@ impl DiscoveryService {
     pub async fn start_discovery(self) -> Result<()> {
         info!("Starting peer discovery...");
         
-        // For MVP, we'll just do broadcasting for now
-        // Full P2P discovery can be implemented later
         let config = self.config.clone();
         let peer_id = self.peer_id;
         
-        let mut interval = interval(Duration::from_secs(5));
-        
-        loop {
-            interval.tick().await;
-            info!("Broadcasting discovery for user: {}", config.username);
-            
-            if let Err(e) = Self::send_discovery_broadcast_static(&self.socket, &config, peer_id).await {
-                warn!("Failed to send discovery broadcast: {}", e);
+        // Create a separate socket for listening on the standard discovery port
+        let standard_port_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.discovery_port);
+        let listen_socket = match UdpSocket::bind(&standard_port_addr).await {
+            Ok(socket) => {
+                info!("Listening for discovery messages on standard port {}", config.discovery_port);
+                Some(Arc::new(socket))
             }
-        }
-    }
-
-    async fn listen_for_peers(mut self) -> Result<()> {
-        let mut buf = [0u8; 1024];
+            Err(_) => {
+                info!("Standard discovery port {} already in use, will only broadcast", config.discovery_port);
+                None
+            }
+        };
         
-        loop {
-            match self.socket.recv_from(&mut buf).await {
-                Ok((len, addr)) => {
-                    let data = &buf[..len];
-                    
-                    if let Ok(message) = serde_json::from_slice::<Message>(data) {
-                        debug!("Received discovery message from {}: {:?}", addr, message);
-                        
-                        // Don't process our own messages
-                        if let Message::Discovery { peer_id, .. } = &message {
-                            if *peer_id == self.peer_id {
-                                continue;
+        // Use our own socket for broadcasting
+        let broadcast_socket = Arc::new(self.socket);
+        let mut message_handler = self.message_handler;
+        
+        // Start listening task (only if we could bind to standard port)
+        let listen_task = if let Some(listen_sock) = listen_socket {
+            Some(tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                
+                loop {
+                    match listen_sock.recv_from(&mut buf).await {
+                        Ok((len, addr)) => {
+                            let data = &buf[..len];
+                            
+                            if let Ok(message) = serde_json::from_slice::<Message>(data) {
+                                debug!("Received discovery message from {}: {:?}", addr, message);
+                                
+                                // Don't process our own messages
+                                if let Message::Discovery { peer_id: received_peer_id, .. } = &message {
+                                    if *received_peer_id == peer_id {
+                                        continue;
+                                    }
+                                }
+                                
+                                if let Err(e) = message_handler.handle_message(message, addr.ip()) {
+                                    warn!("Failed to handle discovery message: {}", e);
+                                }
+                            } else {
+                                debug!("Received invalid discovery message from {}", addr);
                             }
                         }
-                        
-                        if let Err(e) = self.message_handler.handle_message(message, addr.ip()) {
-                            warn!("Failed to handle discovery message: {}", e);
+                        Err(e) => {
+                            error!("Failed to receive discovery message: {}", e);
                         }
-                    } else {
-                        debug!("Received invalid discovery message from {}", addr);
                     }
                 }
-                Err(e) => {
-                    error!("Failed to receive discovery message: {}", e);
+            }))
+        } else {
+            None
+        };
+        
+        // Start broadcasting task
+        let broadcast_config = config.clone();
+        let broadcast_task = tokio::spawn(async move {
+            let mut interval = interval(Duration::from_secs(5));
+            
+            loop {
+                interval.tick().await;
+                
+                if let Err(e) = Self::send_discovery_broadcast_static(&broadcast_socket, &broadcast_config, peer_id).await {
+                    warn!("Failed to send discovery broadcast: {}", e);
                 }
             }
-        }
-    }
-
-    async fn broadcast_discovery_static(socket: UdpSocket, config: Config, peer_id: Uuid) -> Result<()> {
-        let mut interval = interval(Duration::from_secs(5));
+        });
         
-        loop {
-            interval.tick().await;
-            
-            if let Err(e) = Self::send_discovery_broadcast_static(&socket, &config, peer_id).await {
-                warn!("Failed to send discovery broadcast: {}", e);
+        // Run tasks concurrently
+        if let Some(listen_task) = listen_task {
+            tokio::select! {
+                result = listen_task => {
+                    error!("Discovery listening task ended: {:?}", result);
+                }
+                result = broadcast_task => {
+                    error!("Discovery broadcast task ended: {:?}", result);
+                }
+            }
+        } else {
+            // Only run broadcast task
+            if let Err(e) = broadcast_task.await {
+                error!("Discovery broadcast task panicked: {:?}", e);
             }
         }
+        
+        Ok(())
     }
 
-    async fn send_discovery_broadcast_static(socket: &UdpSocket, config: &Config, peer_id: Uuid) -> Result<()> {
+
+
+    async fn send_discovery_broadcast_static(socket: &Arc<UdpSocket>, config: &Config, peer_id: Uuid) -> Result<()> {
         let message = Message::discovery(
             config.username.clone(),
             config.tcp_port_range.0, // Use first port in range for now

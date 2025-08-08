@@ -6,7 +6,7 @@ mod ui;
 use anyhow::Result;
 use config::Config;
 use message::ChatEvent;
-// use network::NetworkProtocol;
+use network::DiscoveryService;
 use std::env;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -32,19 +32,26 @@ async fn main() -> Result<()> {
     info!("Starting as user: {}", config.username);
     
     // Create channels for communication between components
-    let (_event_sender, event_receiver) = mpsc::unbounded_channel::<ChatEvent>();
+    let (event_sender, event_receiver) = mpsc::unbounded_channel::<ChatEvent>();
     let (message_sender, mut message_receiver) = mpsc::unbounded_channel::<String>();
     
     // Create the app
     let app = App::new(username, event_receiver, message_sender);
     let mut terminal_ui = TerminalUI::new(app);
     
-    // Start network protocol in background (simplified for MVP)
-    let network_task = tokio::spawn(async move {
-        info!("Network protocol task started (simplified for MVP)");
-        // For now, just keep the task alive
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+    // Start discovery service in background
+    let discovery_config = config.clone();
+    let discovery_task = tokio::spawn(async move {
+        match DiscoveryService::new(discovery_config, event_sender).await {
+            Ok(discovery_service) => {
+                info!("Discovery service created, starting...");
+                if let Err(e) = discovery_service.start_discovery().await {
+                    error!("Discovery service failed: {}", e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to create discovery service: {}", e);
+            }
         }
     });
     
@@ -66,12 +73,12 @@ async fn main() -> Result<()> {
     info!("All components started. Press Ctrl+C to quit.");
     
     // Wait for any task to complete (or user to quit)
-    tokio::select! {
-        result = network_task => {
-            if let Err(e) = result {
-                error!("Network task panicked: {}", e);
+            tokio::select! {
+            result = discovery_task => {
+                if let Err(e) = result {
+                    error!("Discovery task panicked: {}", e);
+                }
             }
-        }
         result = message_task => {
             if let Err(e) = result {
                 error!("Message task panicked: {}", e);

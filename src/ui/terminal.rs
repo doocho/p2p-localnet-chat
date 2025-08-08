@@ -142,15 +142,34 @@ impl TerminalUI {
         println!("🚀 Local Chat v1.0.0");
         println!("Connected as: {}", self.app.username);
         println!("Discovering peers on local network...");
+        println!("Listening on UDP port 7878 for peer discovery...");
         println!();
         
-        // Simple message loop for demonstration
+        let mut last_peer_count = 0;
+        let mut status_counter = 0;
+        
+        // Enhanced message loop for peer discovery
         loop {
             self.app.handle_events().await;
             
             let peer_count = self.app.get_peer_count();
-            println!("Status: {} peers online | {}", peer_count, self.app.status);
             
+            // Show status every 10 iterations or when peer count changes
+            if status_counter % 10 == 0 || peer_count != last_peer_count {
+                println!("Status: {} peers discovered | {}", peer_count, self.app.status);
+                
+                if peer_count > 0 {
+                    println!("🟢 Discovered peers:");
+                    for peer_info in self.app.get_peer_list() {
+                        println!("  - {}", peer_info);
+                    }
+                    println!();
+                }
+                
+                last_peer_count = peer_count;
+            }
+            
+            // Show any new messages
             if !self.app.messages.is_empty() {
                 let last_msg = self.app.messages.last().unwrap();
                 let time = last_msg.timestamp.format("%H:%M");
@@ -161,10 +180,12 @@ impl TerminalUI {
                 }
             }
             
-            sleep(Duration::from_secs(2)).await;
+            sleep(Duration::from_millis(500)).await;
+            status_counter += 1;
             
-            // For demo, quit after 30 seconds
-            if self.app.messages.len() > 15 {
+            // Run for 2 minutes to see discovery in action
+            if status_counter > 240 {
+                println!("Demo completed. Discovered {} peers total.", peer_count);
                 break;
             }
         }

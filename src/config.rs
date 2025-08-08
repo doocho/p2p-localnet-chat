@@ -30,4 +30,15 @@ impl Config {
         self.username = username;
         self
     }
+    
+    pub fn find_available_discovery_port(&self) -> u16 {
+        // Try the default port first, then try nearby ports
+        for port in self.discovery_port..self.discovery_port + 10 {
+            if let Ok(_) = std::net::UdpSocket::bind(("0.0.0.0", port)) {
+                return port;
+            }
+        }
+        // Fallback to any available port
+        0
+    }
 }
