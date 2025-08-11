@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     
     info!("🚀 Starting Local Chat v1.0.0");
     
-    // Parse CLI arguments: [username] [--channel|-c <name>]
+    // Parse CLI arguments: [username] [--channel|-c <name>] [--nick|-nick <username>]
     let args: Vec<String> = env::args().collect();
     let mut username: Option<String> = None;
     let mut channel: Option<String> = None;
@@ -29,10 +29,10 @@ async fn main() -> Result<()> {
             "--channel" | "-c" => {
                 if i + 1 < args.len() { channel = Some(args[i + 1].clone()); i += 2; } else { break; }
             }
-            other => {
-                if username.is_none() { username = Some(other.to_string()); }
-                i += 1;
+            "--nick" | "-nick" => {
+                if i + 1 < args.len() { username = Some(args[i + 1].clone()); i += 2; } else { break; }
             }
+            _ => { i += 1; }
         }
     }
     let username = username.unwrap_or_else(|| whoami::username());
