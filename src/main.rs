@@ -19,17 +19,27 @@ async fn main() -> Result<()> {
     
     info!("🚀 Starting Local Chat v1.0.0");
     
-    // Get username from command line args or use default
+    // Parse CLI arguments: [username] [--channel|-c <name>]
     let args: Vec<String> = env::args().collect();
-    let username = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        whoami::username()
-    };
+    let mut username: Option<String> = None;
+    let mut channel: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--channel" | "-c" => {
+                if i + 1 < args.len() { channel = Some(args[i + 1].clone()); i += 2; } else { break; }
+            }
+            other => {
+                if username.is_none() { username = Some(other.to_string()); }
+                i += 1;
+            }
+        }
+    }
+    let username = username.unwrap_or_else(|| whoami::username());
     
     // Create configuration
-    let config = Config::new().with_username(username.clone());
-    info!("Starting as user: {}", config.username);
+    let config = Config::new().with_username(username.clone()).with_channel(channel.clone());
+    info!("Starting as user: {} | channel: {}", config.username, channel.clone().unwrap_or_else(|| "(none)".into()));
     
     // Create channels for communication between components
     let (event_sender, event_receiver) = mpsc::unbounded_channel::<ChatEvent>();
@@ -41,16 +51,16 @@ async fn main() -> Result<()> {
         event_sender.clone(),
         username.clone(),
         uuid::Uuid::new_v4(),
+        channel.clone(),
     ).await?);
     
     // Create channels for peer connection coordination
     let (connection_sender, mut connection_receiver) = mpsc::unbounded_channel::<message::Peer>();
     
-    // Create event channels for peer connection coordination
-    let (connection_event_sender, mut connection_event_receiver) = mpsc::unbounded_channel::<ChatEvent>();
+    // (unused) placeholder removed
     
     // Create the app with connection sender for auto-connection
-    let app = App::new(username.clone(), event_receiver, message_sender.clone(), Some(connection_sender.clone()));
+    let app = App::new(username.clone(), event_receiver, message_sender.clone(), Some(connection_sender.clone()), channel.clone());
     let mut terminal_ui = TerminalUI::new(app);
     
     // Get the actual TCP port from PeerManager
@@ -103,7 +113,8 @@ async fn main() -> Result<()> {
             let chat_message = message::Message::chat_message(
                 username_for_messages.clone(),
                 "all".to_string(),
-                message_content
+                message_content,
+                channel.clone(),
             );
             
             // Broadcast to all connected peers

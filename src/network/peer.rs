@@ -15,6 +15,7 @@ pub struct PeerManager {
     event_sender: mpsc::UnboundedSender<ChatEvent>,
     username: String,
     our_peer_id: Uuid,
+    channel: Option<String>,
 }
 
 struct PeerConnection {
@@ -28,6 +29,7 @@ impl PeerManager {
         event_sender: mpsc::UnboundedSender<ChatEvent>,
         username: String,
         our_peer_id: Uuid,
+        channel: Option<String>,
     ) -> Result<Self> {
         // Try the specified port first, then any available port
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -55,6 +57,7 @@ impl PeerManager {
             event_sender,
             username,
             our_peer_id,
+            channel,
         })
     }
 
@@ -65,6 +68,7 @@ impl PeerManager {
         let event_sender = self.event_sender.clone();
         let username = self.username.clone();
         let our_peer_id = self.our_peer_id;
+        let our_channel = self.channel.clone();
         
         loop {
             match self.listener.accept().await {
@@ -75,6 +79,7 @@ impl PeerManager {
                     let event_sender_clone = event_sender.clone();
                     let username_clone = username.clone();
                     
+                    let our_channel_clone = our_channel.clone();
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_incoming_connection(
                             stream, 
@@ -82,7 +87,8 @@ impl PeerManager {
                             connections_clone,
                             event_sender_clone,
                             username_clone,
-                            our_peer_id
+                            our_peer_id,
+                            our_channel_clone
                         ).await {
                             error!("Error handling peer connection from {}: {}", addr, e);
                         }
@@ -102,6 +108,7 @@ impl PeerManager {
         event_sender: mpsc::UnboundedSender<ChatEvent>,
         our_username: String,
         our_peer_id: Uuid,
+        our_channel: Option<String>,
     ) -> Result<()> {
         let (reader, writer) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader);
@@ -127,7 +134,11 @@ impl PeerManager {
                                 debug!("Received message from {}: {:?}", addr, message);
                                 
                                 match &message {
-                                    Message::UserJoin { username, peer_id, .. } => {
+                                    Message::UserJoin { username, peer_id, channel, .. } => {
+                                        if &our_channel != channel {
+                                            debug!("Ignoring incoming TCP join from {} due to channel mismatch", username);
+                                            break;
+                                        }
                                         // Create peer info for this connection
                                         let peer = Peer {
                                             id: *peer_id,
@@ -153,10 +164,11 @@ impl PeerManager {
                                         }
                                         
                                         // Send our own join message back
-                                        let our_join = Message::user_join(our_username.clone(), our_peer_id);
+                                        let our_join = Message::user_join(our_username.clone(), our_peer_id, our_channel.clone());
                                         Self::send_message_to_writer(&writer, &our_join).await?;
                                     }
-                                    Message::ChatMessage { .. } => {
+                                    Message::ChatMessage { channel, .. } => {
+                                        if &our_channel != channel { continue; }
                                         if let Some(ref peer) = peer_info {
                                             let event = ChatEvent::new(peer.clone(), message);
                                             if let Err(e) = event_sender.send(event) {
@@ -266,7 +278,7 @@ impl PeerManager {
                 self.connections.write().await.insert(peer.id, connection);
                 
                 // Send user join message to establish the connection
-                let join_message = Message::user_join(self.username.clone(), self.our_peer_id);
+                let join_message = Message::user_join(self.username.clone(), self.our_peer_id, self.channel.clone());
                 Self::send_message_to_writer(&writer, &join_message).await?;
                 
                 // Start handling messages from this peer

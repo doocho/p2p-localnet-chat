@@ -19,6 +19,7 @@ pub struct App {
     pub input: String,
     pub should_quit: bool,
     pub status: String,
+    pub channel: Option<String>,
     event_receiver: mpsc::UnboundedReceiver<ChatEvent>,
     message_sender: mpsc::UnboundedSender<String>,
     connection_sender: Option<mpsc::UnboundedSender<Peer>>,
@@ -30,6 +31,7 @@ impl App {
         event_receiver: mpsc::UnboundedReceiver<ChatEvent>,
         message_sender: mpsc::UnboundedSender<String>,
         connection_sender: Option<mpsc::UnboundedSender<Peer>>,
+        channel: Option<String>,
     ) -> Self {
         Self {
             username,
@@ -38,6 +40,7 @@ impl App {
             input: String::new(),
             should_quit: false,
             status: "Starting...".to_string(),
+            channel,
             event_receiver,
             message_sender,
             connection_sender,

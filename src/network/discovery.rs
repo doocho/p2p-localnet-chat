@@ -21,7 +21,7 @@ pub struct DiscoveryService {
 
 impl DiscoveryService {
     pub async fn new(
-        mut config: Config,
+        config: Config,
         event_sender: mpsc::UnboundedSender<crate::message::ChatEvent>,
         tcp_port: u16,
     ) -> Result<Self> {
@@ -38,7 +38,12 @@ impl DiscoveryService {
         let actual_addr = socket.local_addr()?;
         info!("Discovery service listening on {}", actual_addr);
         
-        let message_handler = MessageHandler::new(config.username.clone(), event_sender, tcp_port);
+        let message_handler = MessageHandler::new(
+            config.username.clone(),
+            event_sender,
+            tcp_port,
+            config.channel.clone(),
+        );
         let peer_id = message_handler.peer_id();
         
         Ok(Self {
@@ -166,6 +171,7 @@ impl DiscoveryService {
             config.username.clone(),
             tcp_port, // Use actual TCP port
             peer_id,
+            config.channel.clone(),
         );
         
         let data = serde_json::to_vec(&message)

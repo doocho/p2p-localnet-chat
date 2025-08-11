@@ -12,6 +12,7 @@ pub struct MessageHandler {
     username: String,
     event_sender: mpsc::UnboundedSender<ChatEvent>,
     tcp_port: u16,
+    channel: Option<String>,
 }
 
 impl MessageHandler {
@@ -19,6 +20,7 @@ impl MessageHandler {
         username: String,
         event_sender: mpsc::UnboundedSender<ChatEvent>,
         tcp_port: u16,
+        channel: Option<String>,
     ) -> Self {
         Self {
             peers: HashMap::new(),
@@ -26,6 +28,7 @@ impl MessageHandler {
             username,
             event_sender,
             tcp_port,
+            channel,
         }
     }
 
@@ -60,8 +63,13 @@ impl MessageHandler {
 
     pub fn handle_message(&mut self, message: Message, sender_ip: IpAddr) -> Result<()> {
         match &message {
-            Message::Discovery { username, port, peer_id } => {
+            Message::Discovery { username, port, peer_id, channel } => {
                 debug!("Received discovery from {} at {}:{}", username, sender_ip, port);
+                // Filter by channel: only accept matching channel (including None==None)
+                if &self.channel != channel {
+                    debug!("Ignoring discovery from {} due to channel mismatch", username);
+                    return Ok(());
+                }
                 
                 let peer = Peer::new(username.clone(), sender_ip, *port);
                 let peer_with_id = Peer {
@@ -76,6 +84,7 @@ impl MessageHandler {
                     self.username.clone(),
                     self.tcp_port, // Use actual TCP port
                     self.peer_id,
+                    self.channel.clone(),
                 );
                 
                 let event = ChatEvent::new(peer_with_id, response);
@@ -84,8 +93,12 @@ impl MessageHandler {
                 }
             }
             
-            Message::DiscoveryResponse { username, port, peer_id } => {
+            Message::DiscoveryResponse { username, port, peer_id, channel } => {
                 debug!("Received discovery response from {} at {}:{}", username, sender_ip, port);
+                if &self.channel != channel {
+                    debug!("Ignoring discovery response from {} due to channel mismatch", username);
+                    return Ok(());
+                }
                 
                 let peer = Peer::new(username.clone(), sender_ip, *port);
                 let peer_with_id = Peer {
@@ -102,15 +115,19 @@ impl MessageHandler {
                 }
                 
                 // Send a connect trigger event
-                let connect_message = Message::user_join(username.clone(), *peer_id);
+                let connect_message = Message::user_join(username.clone(), *peer_id, self.channel.clone());
                 let connect_event = ChatEvent::new(peer_with_id, connect_message);
                 if let Err(e) = self.event_sender.send(connect_event) {
                     warn!("Failed to send connect event: {}", e);
                 }
             }
             
-            Message::ChatMessage { sender, .. } => {
+            Message::ChatMessage { sender, channel, .. } => {
                 debug!("Received chat message from {}", sender);
+                if &self.channel != channel {
+                    debug!("Ignoring chat message from {} due to channel mismatch", sender);
+                    return Ok(());
+                }
                 
                 if let Some(peer) = self.peers.values().find(|p| p.username == *sender).cloned() {
                     let event = ChatEvent::new(peer, message);
@@ -120,8 +137,12 @@ impl MessageHandler {
                 }
             }
             
-            Message::UserJoin { username, peer_id, .. } => {
+            Message::UserJoin { username, peer_id, channel, .. } => {
                 debug!("User {} joined", username);
+                if &self.channel != channel {
+                    debug!("Ignoring user join for {} due to channel mismatch", username);
+                    return Ok(());
+                }
                 self.update_peer_last_seen(peer_id);
                 
                 if let Some(peer) = self.peers.get(peer_id).cloned() {
@@ -132,8 +153,12 @@ impl MessageHandler {
                 }
             }
             
-            Message::UserLeave { username, peer_id, .. } => {
+            Message::UserLeave { username, peer_id, channel, .. } => {
                 debug!("User {} left", username);
+                if &self.channel != channel {
+                    debug!("Ignoring user leave for {} due to channel mismatch", username);
+                    return Ok(());
+                }
                 self.remove_peer(peer_id);
                 
                 if let Some(peer) = self.peers.get(peer_id).cloned() {

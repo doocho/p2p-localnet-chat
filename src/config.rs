@@ -7,6 +7,7 @@ pub struct Config {
     pub username: String,
     pub network_timeout: u64, // seconds
     pub heartbeat_interval: u64, // seconds
+    pub channel: Option<String>,
 }
 
 impl Default for Config {
@@ -17,6 +18,7 @@ impl Default for Config {
             username: whoami::username(),
             network_timeout: 10,
             heartbeat_interval: 30,
+            channel: None,
         }
     }
 }
@@ -28,6 +30,11 @@ impl Config {
     
     pub fn with_username(mut self, username: String) -> Self {
         self.username = username;
+        self
+    }
+    
+    pub fn with_channel(mut self, channel: Option<String>) -> Self {
+        self.channel = channel;
         self
     }
     

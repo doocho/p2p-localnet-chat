@@ -36,12 +36,14 @@ pub enum Message {
         username: String,
         port: u16,
         peer_id: Uuid,
+        channel: Option<String>,
     },
     #[serde(rename = "discovery_response")]
     DiscoveryResponse {
         username: String,
         port: u16,
         peer_id: Uuid,
+        channel: Option<String>,
     },
     #[serde(rename = "message")]
     ChatMessage {
@@ -50,18 +52,21 @@ pub enum Message {
         content: String,
         timestamp: DateTime<Utc>,
         message_id: Uuid,
+        channel: Option<String>,
     },
     #[serde(rename = "user_join")]
     UserJoin {
         username: String,
         peer_id: Uuid,
         timestamp: DateTime<Utc>,
+        channel: Option<String>,
     },
     #[serde(rename = "user_leave")]
     UserLeave {
         username: String,
         peer_id: Uuid,
         timestamp: DateTime<Utc>,
+        channel: Option<String>,
     },
     #[serde(rename = "heartbeat")]
     Heartbeat {
@@ -71,45 +76,50 @@ pub enum Message {
 }
 
 impl Message {
-    pub fn discovery(username: String, port: u16, peer_id: Uuid) -> Self {
+    pub fn discovery(username: String, port: u16, peer_id: Uuid, channel: Option<String>) -> Self {
         Message::Discovery {
             username,
             port,
             peer_id,
+            channel,
         }
     }
 
-    pub fn discovery_response(username: String, port: u16, peer_id: Uuid) -> Self {
+    pub fn discovery_response(username: String, port: u16, peer_id: Uuid, channel: Option<String>) -> Self {
         Message::DiscoveryResponse {
             username,
             port,
             peer_id,
+            channel,
         }
     }
 
-    pub fn chat_message(sender: String, recipient: String, content: String) -> Self {
+    pub fn chat_message(sender: String, recipient: String, content: String, channel: Option<String>) -> Self {
         Message::ChatMessage {
             sender,
             recipient,
             content,
             timestamp: Utc::now(),
             message_id: Uuid::new_v4(),
+            channel,
         }
     }
 
-    pub fn user_join(username: String, peer_id: Uuid) -> Self {
+    pub fn user_join(username: String, peer_id: Uuid, channel: Option<String>) -> Self {
         Message::UserJoin {
             username,
             peer_id,
             timestamp: Utc::now(),
+            channel,
         }
     }
 
-    pub fn user_leave(username: String, peer_id: Uuid) -> Self {
+    pub fn user_leave(username: String, peer_id: Uuid, channel: Option<String>) -> Self {
         Message::UserLeave {
             username,
             peer_id,
             timestamp: Utc::now(),
+            channel,
         }
     }
 
