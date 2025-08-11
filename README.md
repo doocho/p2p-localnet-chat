@@ -6,19 +6,22 @@ A serverless, peer-to-peer chat application written in Rust that enables real-ti
 
 ### ✅ Currently Implemented (MVP - Phase 1)
 - **Serverless Architecture**: Direct P2P communication without central server
-- **Local Network Discovery**: Automatic detection of devices in the same network subnet
+- **Local Network Discovery**: Automatic detection of devices in the same network subnet (UDP broadcast)
+- **TCP Peer Connections**: Direct peer-to-peer TCP links between discovered peers
+- **Real-time Messaging**: Broadcast chat among connected peers
+- **Channels (Optional)**: Scope conversations by channel using `--channel/-c`; default is global room when unset
+- **Nickname via CLI**: Set nickname using `--nick` or `-nick`
 - **Rust-Powered**: Built with modern Rust for safety, performance, and concurrency
 - **Async I/O**: Non-blocking network operations using Tokio
 - **Structured Logging**: Comprehensive logging with tracing
 - **Cross-Platform**: Supports Windows, macOS, and Linux
 
 ### 🚧 Planned Features (Phase 2 & 3)
-- **Real-time Messaging**: Instant chat with discovered peers
 - **File Transfer**: Share files directly between peers
 - **End-to-End Encryption**: Secure message and file transmission
 - **Rich Terminal UI**: Interactive interface with ratatui
-- **Group Chat**: Multi-peer conversations
-- **Message History**: Session-based chat history
+- **Message History**: Session-based chat history (persistent)
+- **UPnP/NAT Traversal**: P2P library support to traverse home routers (UPnP)
 
 ## 🏗️ Architecture
 
@@ -62,20 +65,24 @@ src/
 
 3. **Run the application**
    ```bash
-   cargo run
-   ```
+   # Using cargo (note the `--` to separate cargo args from app args)
+   cargo run -- --nick alice
 
-   Or with a custom username:
-   ```bash
-   cargo run -- YourUsername
+   # With a channel (only peers with the same channel communicate)
+   cargo run -- --nick alice -c dev
+
+   # Run the built binary directly (no need for the separating `--`)
+   ./target/debug/local-chat --nick alice -c dev
    ```
 
 ### Usage
 
 1. **Start the application** on multiple devices within the same local network
-2. **Automatic Discovery**: The app will automatically discover other instances
-3. **Real-time Status**: Monitor connected peers and network status
-4. **Exit**: Press `Ctrl+C` to quit
+2. **Nickname**: Set with `--nick` or `-nick` (required; positional nickname is not supported)
+3. **Channel (optional)**: Use `--channel` or `-c` to isolate rooms; omit to join the global room
+4. **Automatic Discovery**: Instances with matching channel discover each other
+5. **Real-time Status**: Monitor connected peers and network status
+6. **Exit**: Press `Ctrl+C` to quit
 
 ## 📡 Network Protocol
 
@@ -94,10 +101,10 @@ src/
 - **Connection**: Direct peer-to-peer TCP connections
 
 ### Message Types
-- `discovery`: Announce presence to network
-- `discovery_response`: Respond to discovery requests
-- `message`: Chat messages between peers
-- `user_join`/`user_leave`: User presence notifications
+- `discovery`: Announce presence to network (includes optional `channel`)
+- `discovery_response`: Respond to discovery requests (includes optional `channel`)
+- `message`: Chat messages between peers (includes optional `channel`)
+- `user_join`/`user_leave`: User presence notifications (include optional `channel`)
 - `heartbeat`: Keep-alive messages
 
 ## 🛠️ Configuration
@@ -111,6 +118,7 @@ pub struct Config {
     pub username: String,           // Default: system username
     pub network_timeout: u64,       // Default: 10 seconds
     pub heartbeat_interval: u64,    // Default: 30 seconds
+    pub channel: Option<String>,    // Default: None (global room)
 }
 ```
 
