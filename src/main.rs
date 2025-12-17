@@ -10,14 +10,21 @@ use network::{DiscoveryService, PeerManager};
 use std::env;
 use tokio::sync::mpsc;
 use tracing::{error, info};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use ui::{App, TerminalUI};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt::init();
-    
-    info!("🚀 Starting Local Chat v1.0.0");
+    // Initialize logging to file (to avoid interfering with TUI)
+    let log_file = std::fs::File::create("local-chat.log").ok();
+    if let Some(file) = log_file {
+        tracing_subscriber::registry()
+            .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
+            .with(fmt::layer().with_writer(file).with_ansi(false))
+            .init();
+    }
+
+    info!("Starting Local Chat v1.0.0");
     
     // Parse CLI arguments: [username] [--channel|-c <name>] [--nick|-nick <username>]
     let args: Vec<String> = env::args().collect();

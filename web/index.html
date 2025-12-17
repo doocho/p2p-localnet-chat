@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Chat (WASM demo)</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
+      #log { border: 1px solid #ccc; padding: 8px; height: 240px; overflow: auto; }
+      input, button { padding: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Local Chat (Browser Demo)</h1>
+    <div>
+      <label>Nick: <input id="nick" value="alice" /></label>
+      <label>Channel: <input id="channel" placeholder="(optional)" /></label>
+      <button id="init">Init</button>
+      <button id="ping">Discovery Ping</button>
+    </div>
+    <div style="margin-top:10px;">
+      <input id="msg" placeholder="Type a message" />
+      <button id="send">Send</button>
+    </div>
+    <h3>Messages</h3>
+    <div id="log"></div>
+    <script type="module">
+      import init, { init as wasmInit, discovery_ping, send_message } from './pkg/local_chat_web.js';
+      const log = (t) => {
+        const el = document.getElementById('log');
+        const line = document.createElement('div');
+        line.textContent = t;
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+      };
+      await init();
+      window.addEventListener('local-chat-message', (e) => {
+        try {
+          const data = JSON.parse(e.detail);
+          log(`[${data.type}] ${JSON.stringify(data)}`);
+        } catch {
+          log(`[raw] ${String(e.detail)}`);
+        }
+      });
+      document.getElementById('init').onclick = async () => {
+        const nick = document.getElementById('nick').value;
+        const channel = document.getElementById('channel').value.trim() || undefined;
+        await wasmInit(nick, channel);
+        log(`Initialized as ${nick} channel=${channel ?? '(none)'}`);
+      };
+      document.getElementById('ping').onclick = async () => {
+        await discovery_ping();
+        log('Sent discovery ping');
+      };
+      document.getElementById('send').onclick = async () => {
+        const msg = document.getElementById('msg').value;
+        if (msg.trim()) {
+          await send_message(msg);
+          document.getElementById('msg').value = '';
+        }
+      };
+    </script>
+  </body>
+  </html>
+
+

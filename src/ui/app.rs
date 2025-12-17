@@ -12,6 +12,19 @@ pub struct ChatMessage {
     pub is_own_message: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Normal,
+    Insert,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Messages,
+    Peers,
+    Input,
+}
+
 pub struct App {
     pub username: String,
     pub peers: HashMap<Uuid, Peer>,
@@ -20,6 +33,10 @@ pub struct App {
     pub should_quit: bool,
     pub status: String,
     pub channel: Option<String>,
+    pub scroll_offset: usize,
+    pub cursor_pos: usize,
+    pub input_mode: InputMode,
+    pub focused_pane: Pane,
     event_receiver: mpsc::UnboundedReceiver<ChatEvent>,
     message_sender: mpsc::UnboundedSender<String>,
     connection_sender: Option<mpsc::UnboundedSender<Peer>>,
@@ -41,6 +58,10 @@ impl App {
             should_quit: false,
             status: "Starting...".to_string(),
             channel,
+            scroll_offset: 0,
+            cursor_pos: 0,
+            input_mode: InputMode::Normal,
+            focused_pane: Pane::Input,
             event_receiver,
             message_sender,
             connection_sender,
@@ -70,16 +91,18 @@ impl App {
     pub fn send_message(&mut self) {
         if !self.input.trim().is_empty() {
             let content = self.input.trim().to_string();
-            
+
             // Add to our own message history
             self.add_message(self.username.clone(), content.clone(), true);
-            
+
             // Send to network
             if let Err(e) = self.message_sender.send(content) {
                 self.update_status(format!("Failed to send message: {}", e));
             }
-            
+
             self.input.clear();
+            self.cursor_pos = 0;
+            self.scroll_offset = 0;
         }
     }
 
@@ -88,11 +111,75 @@ impl App {
     }
 
     pub fn add_char(&mut self, c: char) {
-        self.input.push(c);
+        self.input.insert(self.cursor_pos, c);
+        self.cursor_pos += 1;
     }
 
     pub fn remove_char(&mut self) {
-        self.input.pop();
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+            self.input.remove(self.cursor_pos);
+        }
+    }
+
+    pub fn delete_char(&mut self) {
+        if self.cursor_pos < self.input.len() {
+            self.input.remove(self.cursor_pos);
+        }
+    }
+
+    pub fn move_cursor_left(&mut self) {
+        self.cursor_pos = self.cursor_pos.saturating_sub(1);
+    }
+
+    pub fn move_cursor_right(&mut self) {
+        if self.cursor_pos < self.input.len() {
+            self.cursor_pos += 1;
+        }
+    }
+
+    pub fn move_cursor_start(&mut self) {
+        self.cursor_pos = 0;
+    }
+
+    pub fn move_cursor_end(&mut self) {
+        self.cursor_pos = self.input.len();
+    }
+
+    pub fn scroll_up(&mut self) {
+        let max_scroll = self.messages.len().saturating_sub(1);
+        if self.scroll_offset < max_scroll {
+            self.scroll_offset += 1;
+        }
+    }
+
+    pub fn scroll_down(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.scroll_offset = self.messages.len().saturating_sub(1);
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn enter_insert_mode(&mut self) {
+        self.input_mode = InputMode::Insert;
+        self.focused_pane = Pane::Input;
+    }
+
+    pub fn enter_normal_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn cycle_focus(&mut self) {
+        self.focused_pane = match self.focused_pane {
+            Pane::Messages => Pane::Peers,
+            Pane::Peers => Pane::Input,
+            Pane::Input => Pane::Messages,
+        };
     }
 
     pub async fn handle_events(&mut self) {

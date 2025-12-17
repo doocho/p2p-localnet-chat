@@ -1,4 +1,4 @@
-use super::types::{Message, Peer, ChatEvent};
+use local_chat_core::message::{Message, Peer, ChatEvent};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::net::IpAddr;

@@ -136,6 +136,11 @@ pub struct Config {
 - **local-ip-address**: Local network detection
 - **whoami**: System username detection
 
+### WASM (Browser) Dependencies
+- **wasm-bindgen**, **web-sys**, **js-sys**: WebAssembly and Web APIs
+- **console_error_panic_hook**: Better error messages in browser console
+- **once_cell**: Simple global state for browser bridge
+
 ## 🔧 Development
 
 ### Building
@@ -178,10 +183,11 @@ cargo fix
 - [x] Logging and error handling
 
 ### 🚧 Phase 2: Core Features (In Progress)
-- [ ] Real UDP broadcast discovery
-- [ ] TCP peer connections
-- [ ] Interactive terminal UI
-- [ ] Real-time messaging
+- [x] Real UDP broadcast discovery (native)
+- [x] TCP peer connections (native)
+- [x] Interactive terminal UI (native)
+- [x] Real-time messaging (native)
+- [ ] Browser demo via BroadcastChannel (WASM)
 - [ ] Error handling improvements
 
 ### 📋 Phase 3: Advanced Features (Planned)
@@ -280,9 +286,7 @@ RUST_LOG=debug cargo run
 ## 🎯 Roadmap
 
 ### Short Term (Next 4 weeks)
-- Complete P2P discovery implementation
-- Add real-time messaging
-- Improve terminal user interface
+- Complete browser demo (WASM) with BroadcastChannel
 - Add comprehensive testing
 
 ### Medium Term (2-3 months)
