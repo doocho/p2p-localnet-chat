@@ -4,22 +4,23 @@ A serverless, peer-to-peer chat application written in Rust that enables real-ti
 
 ## 🌟 Features
 
-### ✅ Currently Implemented (MVP - Phase 1)
+### ✅ Currently Implemented (MVP - Phase 1 & 2)
 - **Serverless Architecture**: Direct P2P communication without central server
 - **Local Network Discovery**: Automatic detection of devices in the same network subnet (UDP broadcast)
 - **TCP Peer Connections**: Direct peer-to-peer TCP links between discovered peers
 - **Real-time Messaging**: Broadcast chat among connected peers
 - **Channels (Optional)**: Scope conversations by channel using `--channel/-c`; default is global room when unset
 - **Nickname via CLI**: Set nickname using `--nick` or `-nick`
+- **Rich Terminal UI**: Interactive interface built with ratatui
+- **Vim Keybindings**: Normal/Insert mode navigation (press `i` to type, `Esc` to navigate)
 - **Rust-Powered**: Built with modern Rust for safety, performance, and concurrency
 - **Async I/O**: Non-blocking network operations using Tokio
 - **Structured Logging**: Comprehensive logging with tracing
 - **Cross-Platform**: Supports Windows, macOS, and Linux
 
-### 🚧 Planned Features (Phase 2 & 3)
+### 🚧 Planned Features (Phase 3)
 - **File Transfer**: Share files directly between peers
 - **End-to-End Encryption**: Secure message and file transmission
-- **Rich Terminal UI**: Interactive interface with ratatui
 - **Message History**: Session-based chat history (persistent)
 - **UPnP/NAT Traversal**: P2P library support to traverse home routers (UPnP)
 
@@ -31,16 +32,32 @@ The application follows a modular architecture with clear separation of concerns
 src/
 ├── main.rs                 # Application entry point and orchestration
 ├── config.rs               # Configuration management
+├── lib.rs                  # Library exports
 ├── network/                # Network layer
+│   ├── mod.rs              # Module exports
 │   ├── discovery.rs        # Peer discovery via UDP broadcast
 │   ├── peer.rs             # TCP peer connection management
 │   └── protocol.rs         # Network protocol definitions
 ├── message/                # Message handling
+│   ├── mod.rs              # Module exports
 │   ├── types.rs            # Message type definitions and serialization
 │   └── handler.rs          # Message processing logic
-└── ui/                     # User interface
+└── ui/                     # User interface (ratatui TUI)
+    ├── mod.rs              # Module exports
     ├── app.rs              # Application state management
-    └── terminal.rs         # Terminal-based user interface
+    ├── tui.rs              # Terminal initialization/cleanup
+    ├── terminal.rs         # Event handling and rendering
+    ├── widgets.rs          # Custom UI widgets
+    └── theme.rs            # UI theming and colors
+
+core/                       # Shared core library
+└── src/
+    ├── lib.rs              # Core library exports
+    └── message.rs          # Shared message types
+
+web/                        # WebAssembly browser support (WIP)
+└── src/
+    └── lib.rs              # WASM bindings
 ```
 
 ## 🚀 Quick Start
@@ -82,7 +99,32 @@ src/
 3. **Channel (optional)**: Use `--channel` or `-c` to isolate rooms; omit to join the global room
 4. **Automatic Discovery**: Instances with matching channel discover each other
 5. **Real-time Status**: Monitor connected peers and network status
-6. **Exit**: Press `Ctrl+C` to quit
+
+### Keyboard Shortcuts
+
+The application uses vim-style keybindings with Normal and Insert modes:
+
+#### Normal Mode (default)
+| Key | Action |
+|-----|--------|
+| `i` | Enter Insert mode (start typing) |
+| `q` | Quit application |
+| `Tab` | Cycle focus between panes |
+| `j` / `↓` | Scroll messages down |
+| `k` / `↑` | Scroll messages up |
+| `g` | Scroll to top of messages |
+| `G` | Scroll to bottom of messages |
+
+#### Insert Mode
+| Key | Action |
+|-----|--------|
+| `Esc` | Return to Normal mode |
+| `Enter` | Send message |
+| `←` / `→` | Move cursor |
+| `Backspace` | Delete character before cursor |
+| `Delete` | Delete character after cursor |
+| `Home` / `Ctrl+a` | Move cursor to start |
+| `End` / `Ctrl+e` | Move cursor to end |
 
 ## 📡 Network Protocol
 
@@ -135,6 +177,11 @@ pub struct Config {
 ### Network Dependencies
 - **local-ip-address**: Local network detection
 - **whoami**: System username detection
+- **socket2**: Low-level socket configuration
+
+### UI Dependencies
+- **ratatui**: Terminal user interface framework
+- **crossterm**: Cross-platform terminal manipulation
 
 ### WASM (Browser) Dependencies
 - **wasm-bindgen**, **web-sys**, **js-sys**: WebAssembly and Web APIs
@@ -182,20 +229,21 @@ cargo fix
 - [x] Configuration system
 - [x] Logging and error handling
 
-### 🚧 Phase 2: Core Features (In Progress)
+### ✅ Phase 2: Core Features (Completed)
 - [x] Real UDP broadcast discovery (native)
 - [x] TCP peer connections (native)
 - [x] Interactive terminal UI (native)
 - [x] Real-time messaging (native)
-- [ ] Browser demo via BroadcastChannel (WASM)
-- [ ] Error handling improvements
+- [x] Rich terminal interface with ratatui
+- [x] Vim-style keybindings (Normal/Insert modes)
 
-### 📋 Phase 3: Advanced Features (Planned)
+### 🚧 Phase 3: Advanced Features (In Progress)
+- [ ] Browser demo via BroadcastChannel (WASM)
 - [ ] File transfer capabilities
 - [ ] End-to-end encryption
-- [ ] Rich terminal interface (ratatui)
 - [ ] Configuration files
 - [ ] Network diagnostics
+- [ ] Error handling improvements
 
 ## 🤝 Contributing
 
@@ -285,17 +333,14 @@ RUST_LOG=debug cargo run
 
 ## 🎯 Roadmap
 
-### Short Term (Next 4 weeks)
+### Next Up
 - Complete browser demo (WASM) with BroadcastChannel
 - Add comprehensive testing
-
-### Medium Term (2-3 months)
-- File transfer functionality
-- Message encryption
-- Rich terminal UI with ratatui
 - Configuration file support
 
-### Long Term (6+ months)
+### Future
+- File transfer functionality
+- End-to-end message encryption
 - Mobile app versions
 - Web interface
 - Plugin system
